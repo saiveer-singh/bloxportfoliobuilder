@@ -1,5 +1,14 @@
 import { motion } from "framer-motion";
 
+function isAllowedUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 type GeneratedPortfolio = {
   headline: string;
   elevatorPitch: string;
@@ -45,22 +54,33 @@ export function PortfolioPreview({ data }: { data: GeneratedPortfolio }) {
     },
   };
 
+  // Sanitize font names to prevent CSS injection
+  const safeFontBody = data.theme
+    ? data.theme.fontBody.replace(/[^a-zA-Z0-9 -]/g, "")
+    : "";
+  const safeFontDisplay = data.theme
+    ? data.theme.fontDisplay.replace(/[^a-zA-Z0-9 -]/g, "")
+    : "";
+
   // Calculate Google Fonts URL based on the theme
   const fontUrl = data.theme
-    ? `https://fonts.googleapis.com/css2?family=${data.theme.fontBody.replace(/\s+/g, "+")}:wght@300;400;500;600;700&family=${data.theme.fontDisplay.replace(/\s+/g, "+")}:wght@400;500;600;700;800&display=swap`
+    ? `https://fonts.googleapis.com/css2?family=${safeFontBody.replace(/\s+/g, "+")}:wght@300;400;500;600;700&family=${safeFontDisplay.replace(/\s+/g, "+")}:wght@400;500;600;700;800&display=swap`
     : "";
+
+  // Sanitize CSS values to prevent injection
+  const sanitizeCss = (v: string) => v.replace(/[;{}()<>\\/"'`]/g, "");
 
   const dynamicStyles = data.theme
     ? {
-      "--bg": data.theme.bg,
-      "--bg-surface": data.theme.bgSurface,
-      "--ink": data.theme.ink,
-      "--accent": data.theme.accent,
-      "--font-body": `"${data.theme.fontBody}", ui-sans-serif, system-ui, sans-serif`,
-      "--font-display": `"${data.theme.fontDisplay}", sans-serif`,
-      "--radius-sm": data.theme.radius,
-      "--radius-md": data.theme.radius,
-      "--radius-lg": data.theme.radius,
+      "--bg": sanitizeCss(data.theme.bg),
+      "--bg-surface": sanitizeCss(data.theme.bgSurface),
+      "--ink": sanitizeCss(data.theme.ink),
+      "--accent": sanitizeCss(data.theme.accent),
+      "--font-body": `"${safeFontBody}", ui-sans-serif, system-ui, sans-serif`,
+      "--font-display": `"${safeFontDisplay}", sans-serif`,
+      "--radius-sm": sanitizeCss(data.theme.radius),
+      "--radius-md": sanitizeCss(data.theme.radius),
+      "--radius-lg": sanitizeCss(data.theme.radius),
     } as React.CSSProperties
     : {};
 
@@ -126,7 +146,7 @@ export function PortfolioPreview({ data }: { data: GeneratedPortfolio }) {
                 variants={itemVariants}
                 whileHover={{ scale: 1.02, transition: { duration: 0.3 } }}
               >
-                {p.imageUrl && (
+                {p.imageUrl && isAllowedUrl(p.imageUrl) && (
                   <div className="site-preview-project-image-container">
                     <img src={p.imageUrl} alt={p.name} className="site-preview-project-image" />
                   </div>
@@ -143,8 +163,8 @@ export function PortfolioPreview({ data }: { data: GeneratedPortfolio }) {
                   <div className="site-preview-project-details">
                     <p className="site-preview-project-summary">{p.summary}</p>
                     <p className="site-preview-project-impact">{p.impact}</p>
-                    {p.gameUrl && (
-                      <a href={p.gameUrl} target="_blank" rel="noreferrer" className="site-preview-game-link">
+                    {p.gameUrl && isAllowedUrl(p.gameUrl) && (
+                      <a href={p.gameUrl} target="_blank" rel="noopener noreferrer" className="site-preview-game-link">
                         [ PLAY EXPERIENCE ]
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <line x1="7" y1="17" x2="17" y2="7"></line>

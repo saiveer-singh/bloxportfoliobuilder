@@ -715,6 +715,34 @@ Return ONLY valid JSON. No markdown fences, no explanation.`;
   },
 });
 
+const MAX_SHORT_TEXT = 500;
+const MAX_LONG_TEXT = 5000;
+const MAX_SKILLS = 50;
+const MAX_PROJECTS = 20;
+const MAX_SECTIONS = 20;
+
+function assertFieldLengths(args: {
+  robloxUsername: string;
+  primaryRole: string;
+  headline: string;
+  elevatorPitch: string;
+  about: string;
+  cta: string;
+  skills: string[];
+  highlightedProjects: unknown[];
+  sectionBlocks: unknown[];
+}) {
+  if (args.robloxUsername.length > MAX_SHORT_TEXT) throw new Error("robloxUsername too long.");
+  if (args.primaryRole.length > MAX_SHORT_TEXT) throw new Error("primaryRole too long.");
+  if (args.headline.length > MAX_SHORT_TEXT) throw new Error("headline too long.");
+  if (args.elevatorPitch.length > MAX_LONG_TEXT) throw new Error("elevatorPitch too long.");
+  if (args.about.length > MAX_LONG_TEXT) throw new Error("about too long.");
+  if (args.cta.length > MAX_SHORT_TEXT) throw new Error("cta too long.");
+  if (args.skills.length > MAX_SKILLS) throw new Error("Too many skills.");
+  if (args.highlightedProjects.length > MAX_PROJECTS) throw new Error("Too many projects.");
+  if (args.sectionBlocks.length > MAX_SECTIONS) throw new Error("Too many sections.");
+}
+
 export const savePortfolio = mutation({
   args: {
     ...tokenValidator.fields,
@@ -723,6 +751,7 @@ export const savePortfolio = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUserByToken(ctx.db, args.token);
+    assertFieldLengths(args);
 
     const id = await ctx.db.insert("portfolios", {
       userId: user._id,
