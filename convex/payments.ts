@@ -52,6 +52,17 @@ export const createCheckoutSession = action({
 
     const returnUrlClean = args.returnUrl.replace(/[?#].*$/, "");
 
+    // Validate the return URL uses https or http scheme to prevent open redirects
+    let parsedReturnUrl: URL;
+    try {
+      parsedReturnUrl = new URL(returnUrlClean);
+    } catch {
+      throw new Error("Invalid return URL.");
+    }
+    if (parsedReturnUrl.protocol !== "https:" && parsedReturnUrl.protocol !== "http:") {
+      throw new Error("Invalid return URL scheme.");
+    }
+
     const params = new URLSearchParams();
     params.set("mode", "payment");
     params.set("success_url", `${returnUrlClean}?payment=success&session_id={CHECKOUT_SESSION_ID}`);

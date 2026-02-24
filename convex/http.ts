@@ -4,6 +4,36 @@ import { api, internal } from "./_generated/api";
 
 const http = httpRouter();
 
+// ─── HTML / CSS Sanitization Helpers ───
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function sanitizeCssValue(value: string): string {
+  // Strip anything that could break out of a CSS value context
+  return value.replace(/[;{}()<>\\/"'`]/g, "");
+}
+
+function sanitizeFontName(name: string): string {
+  // Allow only alphanumeric, spaces, and hyphens in font names
+  return name.replace(/[^a-zA-Z0-9 -]/g, "");
+}
+
+function isAllowedUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 // ─── Stripe Webhook ───
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -36,7 +66,12 @@ async function verifyStripeSignature(
   if (age > 300) return false;
 
   const expected = await computeHmacSha256(secret, `${timestamp}.${body}`);
-  return expected === v1Sig;
+  if (expected.length !== v1Sig.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ v1Sig.charCodeAt(i);
+  }
+  return mismatch === 0;
 }
 
 http.route({
@@ -106,12 +141,14 @@ http.route({
     const noiseSvg = "data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E";
 
     const projectsHtml = portfolio.highlightedProjects.map((p: any) => {
-      const stackHtml = p.stack.map((s: string) => `<span>${s}</span>`).join("");
-      const imageHtml = p.imageUrl
-        ? `<div class="project-image-container"><img src="${p.imageUrl}" alt="${p.name}" class="project-image" /></div>`
+      const stackHtml = p.stack.map((s: string) => `<span>${escapeHtml(s)}</span>`).join("");
+      const safeImageUrl = p.imageUrl && isAllowedUrl(p.imageUrl) ? escapeHtml(p.imageUrl) : "";
+      const imageHtml = safeImageUrl
+        ? `<div class="project-image-container"><img src="${safeImageUrl}" alt="${escapeHtml(p.name)}" class="project-image" /></div>`
         : "";
-      const gameLinkHtml = p.gameUrl
-        ? `<a href="${p.gameUrl}" target="_blank" rel="noreferrer" class="game-link">[ PLAY EXPERIENCE ] <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>`
+      const safeGameUrl = p.gameUrl && isAllowedUrl(p.gameUrl) ? escapeHtml(p.gameUrl) : "";
+      const gameLinkHtml = safeGameUrl
+        ? `<a href="${safeGameUrl}" target="_blank" rel="noopener noreferrer" class="game-link">[ PLAY EXPERIENCE ] <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>`
         : "";
 
       return `
@@ -119,12 +156,12 @@ http.route({
           ${imageHtml}
           <div class="project-content-wrapper">
             <div class="project-meta">
-              <h3>${p.name}</h3>
+              <h3>${escapeHtml(p.name)}</h3>
               <div class="stack">${stackHtml}</div>
             </div>
             <div class="details">
-              <div class="summary">${p.summary}</div>
-              <div class="impact">${p.impact}</div>
+              <div class="summary">${escapeHtml(p.summary)}</div>
+              <div class="impact">${escapeHtml(p.impact)}</div>
               ${gameLinkHtml}
             </div>
           </div>
@@ -132,7 +169,7 @@ http.route({
       `;
     }).join("");
 
-    const skillsHtml = portfolio.skills.map((s: string) => `<div class="skill">${s}</div>`).join("");
+    const skillsHtml = portfolio.skills.map((s: string) => `<div class="skill">${escapeHtml(s)}</div>`).join("");
 
     const sectionsHtml = portfolio.sectionBlocks && portfolio.sectionBlocks.length > 0
       ? `
@@ -141,8 +178,8 @@ http.route({
         <div class="extra-grid">
           ${portfolio.sectionBlocks.map((b: any) => `
             <div class="extra-block">
-              <h4>${b.title}</h4>
-              <p>${b.body}</p>
+              <h4>${escapeHtml(b.title)}</h4>
+              <p>${escapeHtml(b.body)}</p>
             </div>
           `).join("")}
         </div>
@@ -160,31 +197,39 @@ http.route({
       radius: "0px",
     };
     const t = portfolio.theme || defaultTheme;
-    const fontBodyUrl = t.fontBody.replace(/\s+/g, "+");
-    const fontDisplayUrl = t.fontDisplay.replace(/\s+/g, "+");
+    const safeFontBody = sanitizeFontName(t.fontBody);
+    const safeFontDisplay = sanitizeFontName(t.fontDisplay);
+    const fontBodyUrl = safeFontBody.replace(/\s+/g, "+");
+    const fontDisplayUrl = safeFontDisplay.replace(/\s+/g, "+");
+
+    const safeBg = sanitizeCssValue(t.bg);
+    const safeBgSurface = sanitizeCssValue(t.bgSurface);
+    const safeInk = sanitizeCssValue(t.ink);
+    const safeAccent = sanitizeCssValue(t.accent);
+    const safeRadius = sanitizeCssValue(t.radius);
 
     const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${portfolio.robloxUsername} | Bloxfolio</title>
+<title>${escapeHtml(portfolio.robloxUsername)} | Bloxfolio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=${fontBodyUrl}:wght@300;400;500;600;700&family=${fontDisplayUrl}:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: ${t.bg};
-  --bg-surface: ${t.bgSurface};
-  --ink: ${t.ink};
-  --accent: ${t.accent};
+  --bg: ${safeBg};
+  --bg-surface: ${safeBgSurface};
+  --ink: ${safeInk};
+  --accent: ${safeAccent};
   --border: rgba(255, 255, 255, 0.1);
-  --font-body: '${t.fontBody}', ui-sans-serif, system-ui, sans-serif;
-  --font-display: '${t.fontDisplay}', sans-serif;
+  --font-body: '${safeFontBody}', ui-sans-serif, system-ui, sans-serif;
+  --font-display: '${safeFontDisplay}', sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --radius-sm: ${t.radius};
-  --radius-md: ${t.radius};
-  --radius-lg: ${t.radius};
+  --radius-sm: ${safeRadius};
+  --radius-md: ${safeRadius};
+  --radius-lg: ${safeRadius};
 }
 
 body::before {
@@ -290,13 +335,13 @@ a { color: inherit; text-decoration: none; }
   </header>
 
   <section class="hero">
-    <h1 class="headline">${portfolio.headline}</h1>
-    <p class="pitch">${portfolio.elevatorPitch}</p>
+    <h1 class="headline">${escapeHtml(portfolio.headline)}</h1>
+    <p class="pitch">${escapeHtml(portfolio.elevatorPitch)}</p>
   </section>
 
   <section id="about" class="section">
     <div class="section-title">01 / About</div>
-    <div class="about"><p>${portfolio.about}</p></div>
+    <div class="about"><p>${escapeHtml(portfolio.about)}</p></div>
   </section>
 
   <section id="projects" class="section">
@@ -314,9 +359,9 @@ a { color: inherit; text-decoration: none; }
   ${sectionsHtml}
 
   <footer class="footer">
-    <h2 class="cta">${portfolio.cta}</h2>
+    <h2 class="cta">${escapeHtml(portfolio.cta)}</h2>
     <div class="footer-bottom">
-      <span>© ${new Date().getFullYear()} ${portfolio.robloxUsername}</span>
+      <span>© ${new Date().getFullYear()} ${escapeHtml(portfolio.robloxUsername)}</span>
       <span>Built with Bloxfolio</span>
     </div>
   </footer>
@@ -328,6 +373,8 @@ a { color: inherit; text-decoration: none; }
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "public, max-age=60",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; script-src 'none';",
       },
     });
   }),
