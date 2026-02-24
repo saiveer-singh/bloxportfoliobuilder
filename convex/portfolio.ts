@@ -732,12 +732,12 @@ function assertFieldLengths(args: {
   highlightedProjects: unknown[];
   sectionBlocks: unknown[];
 }) {
-  if (args.robloxUsername.length > MAX_SHORT_TEXT) throw new Error("robloxUsername too long.");
-  if (args.primaryRole.length > MAX_SHORT_TEXT) throw new Error("primaryRole too long.");
-  if (args.headline.length > MAX_SHORT_TEXT) throw new Error("headline too long.");
-  if (args.elevatorPitch.length > MAX_LONG_TEXT) throw new Error("elevatorPitch too long.");
-  if (args.about.length > MAX_LONG_TEXT) throw new Error("about too long.");
-  if (args.cta.length > MAX_SHORT_TEXT) throw new Error("cta too long.");
+  if (args.robloxUsername.length > MAX_SHORT_TEXT) throw new Error("Roblox username is too long.");
+  if (args.primaryRole.length > MAX_SHORT_TEXT) throw new Error("Primary role is too long.");
+  if (args.headline.length > MAX_SHORT_TEXT) throw new Error("Headline is too long.");
+  if (args.elevatorPitch.length > MAX_LONG_TEXT) throw new Error("Elevator pitch is too long.");
+  if (args.about.length > MAX_LONG_TEXT) throw new Error("About section is too long.");
+  if (args.cta.length > MAX_SHORT_TEXT) throw new Error("Call to action is too long.");
   if (args.skills.length > MAX_SKILLS) throw new Error("Too many skills.");
   if (args.highlightedProjects.length > MAX_PROJECTS) throw new Error("Too many projects.");
   if (args.sectionBlocks.length > MAX_SECTIONS) throw new Error("Too many sections.");

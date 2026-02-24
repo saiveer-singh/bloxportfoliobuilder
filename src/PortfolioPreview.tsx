@@ -1,5 +1,9 @@
 import { motion } from "framer-motion";
 
+function sanitizeFontName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9 -]/g, "");
+}
+
 function isAllowedUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -56,10 +60,10 @@ export function PortfolioPreview({ data }: { data: GeneratedPortfolio }) {
 
   // Sanitize font names to prevent CSS injection
   const safeFontBody = data.theme
-    ? data.theme.fontBody.replace(/[^a-zA-Z0-9 -]/g, "")
+    ? sanitizeFontName(data.theme.fontBody)
     : "";
   const safeFontDisplay = data.theme
-    ? data.theme.fontDisplay.replace(/[^a-zA-Z0-9 -]/g, "")
+    ? sanitizeFontName(data.theme.fontDisplay)
     : "";
 
   // Calculate Google Fonts URL based on the theme
