@@ -72,7 +72,7 @@ export default defineSchema({
     userId: v.id("users"),
     purpose: v.string(), // e.g. "generate", "revise"
     text: v.string(), // Accumulated text or JSON
-    state: v.string(), // "streaming" | "completed" | "error"
+    state: v.union(v.literal("streaming"), v.literal("completed"), v.literal("error")),
     updatedAt: v.number(),
   }).index("by_userId", ["userId"]),
 
@@ -81,7 +81,7 @@ export default defineSchema({
     mood: v.number(),
     messages: v.array(
       v.object({
-        role: v.string(),
+        role: v.union(v.literal("assistant"), v.literal("user")),
         text: v.string(),
       }),
     ),

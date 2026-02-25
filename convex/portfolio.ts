@@ -2,6 +2,8 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { action, mutation, query, internalMutation } from "./_generated/server.js";
 import { internal } from "./_generated/api.js";
+import type { Id } from "./_generated/dataModel";
+import type { ActionCtx } from "./_generated/server.js";
 import { requireUserByToken } from "./auth";
 
 const projectValidator = v.object({
@@ -57,7 +59,7 @@ const generatedValidator = v.object({
 const currentUserByToken = makeFunctionReference<
   "query",
   { token: string },
-  { _id: string; username: string; createdAt: number } | null
+  { _id: Id<"users">; username: string; createdAt: number } | null
 >("auth:currentUser");
 
 type GeneratedPortfolio = {
@@ -143,33 +145,6 @@ function collectBalancedJsonObjects(rawContent: string): string[] {
   }
 
   return objects;
-}
-
-function extractModelContent(messageContent: unknown): string | null {
-  if (typeof messageContent === "string") {
-    const trimmed = messageContent.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-
-  if (!Array.isArray(messageContent)) {
-    return null;
-  }
-
-  const merged = messageContent
-    .flatMap((part) => {
-      if (typeof part === "string") {
-        return part;
-      }
-      if (!part || typeof part !== "object") {
-        return [];
-      }
-      const text = (part as { text?: unknown }).text;
-      return typeof text === "string" ? text : [];
-    })
-    .join("\n")
-    .trim();
-
-  return merged.length > 0 ? merged : null;
 }
 
 function parseModelJson(rawContent: string): unknown {
@@ -328,8 +303,8 @@ function normalizeGeneratedPayload(raw: unknown): GeneratedPortfolio {
 }
 
 async function runOpenRouterCompletion(
-  ctx: any,
-  streamId: string | undefined,
+  ctx: ActionCtx,
+  streamId: Id<"streams"> | undefined,
   args: {
     model: string;
     apiKey: string;
@@ -364,7 +339,7 @@ async function runOpenRouterCompletion(
 
     if (streamId) {
       await ctx.runMutation(internal.portfolio.appendStream, {
-        streamId: streamId as any,
+        streamId,
         textChunk: `\n\n[Error from AI Provider: ${response.status}]`,
         isDone: false,
         isError: true,
@@ -454,7 +429,7 @@ async function runOpenRouterCompletion(
             // Batch mutations every 200ms to avoid overwhelming the DB
             if (streamId && Date.now() - lastMutationTime > 200) {
               await ctx.runMutation(internal.portfolio.appendStream, {
-                streamId: streamId as any,
+                streamId,
                 textChunk: pendingAppend,
                 isDone: false,
                 isError: false,
@@ -463,7 +438,7 @@ async function runOpenRouterCompletion(
               lastMutationTime = Date.now();
             }
           }
-        } catch (e) {
+        } catch {
           // ignore parse errors for partial lines or fast streaming
         }
       }
@@ -472,7 +447,7 @@ async function runOpenRouterCompletion(
 
   if (streamId && pendingAppend) {
     await ctx.runMutation(internal.portfolio.appendStream, {
-      streamId: streamId as any,
+      streamId,
       textChunk: pendingAppend,
       isDone: false,
       isError: false,
@@ -481,7 +456,7 @@ async function runOpenRouterCompletion(
 
   if (streamId) {
     await ctx.runMutation(internal.portfolio.appendStream, {
-      streamId: streamId as any,
+      streamId,
       textChunk: "",
       isDone: true,
       isError: false,
@@ -654,6 +629,11 @@ export const revisePortfolioCopy = action({
     if (!apiKey) {
       throw new Error(
         "Missing OPENROUTER_API_KEY in process env. Set it in .env.local.",
+      );
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(apiKey) || apiKey.length < 10) {
+      throw new Error(
+        "Invalid OPENROUTER_API_KEY format. Confirm you copied a valid OpenRouter key from the OpenRouter dashboard.",
       );
     }
 
@@ -939,9 +919,15 @@ export const appendStream = internalMutation({
 
 export const getStream = query({
   args: {
+    ...tokenValidator.fields,
     streamId: v.id("streams"),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.streamId);
+    const user = await requireUserByToken(ctx.db, args.token);
+    const stream = await ctx.db.get(args.streamId);
+    if (!stream || stream.userId !== user._id) {
+      return null;
+    }
+    return stream;
   },
 });

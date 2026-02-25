@@ -3,6 +3,23 @@ import { makeFunctionReference } from "convex/server";
 import { action, query, internalMutation, internalQuery } from "./_generated/server.js";
 import { requireUserByToken, type AuthenticatedUser } from "./auth";
 
+const ALLOWED_PAYMENT_AMOUNTS = new Set([499, 899]);
+
+function sanitizeReturnUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Invalid return URL.");
+    }
+
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    throw new Error("Invalid return URL.");
+  }
+}
+
 const currentUserByToken = makeFunctionReference<
   "query",
   { token: string },
@@ -34,7 +51,7 @@ export const createCheckoutSession = action({
     const user = await ctx.runQuery(currentUserByToken, { token: args.token });
     if (!user) throw new Error("Unauthorized");
 
-    if (args.amount !== 899 && args.amount !== 499) {
+    if (!ALLOWED_PAYMENT_AMOUNTS.has(args.amount)) {
       throw new Error("Invalid amount.");
     }
 
@@ -50,7 +67,7 @@ export const createCheckoutSession = action({
         ? "Bloxfolio Builder Access (Bargain Deal)"
         : "Bloxfolio Builder Access";
 
-    const returnUrlClean = args.returnUrl.replace(/[?#].*$/, "");
+    const returnUrlClean = sanitizeReturnUrl(args.returnUrl);
 
     // Validate the return URL uses https or http scheme to prevent open redirects
     let parsedReturnUrl: URL;
@@ -90,7 +107,11 @@ export const createCheckoutSession = action({
       throw new Error("Failed to create checkout session. Check Stripe configuration.");
     }
 
-    const session = await response.json();
+    const session = (await response.json()) as { url?: unknown };
+    if (typeof session.url !== "string" || session.url.length === 0) {
+      throw new Error("Stripe did not return a checkout URL.");
+    }
+
     return { url: session.url };
   },
 });

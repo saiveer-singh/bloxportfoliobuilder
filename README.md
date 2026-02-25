@@ -50,8 +50,12 @@ npm run dev
 - `npm run dev` -> Vite dev server
 - `npm run convex:dev` -> Convex dev server with `.env.local` loaded into process env
 - `npm run build` -> TypeScript build + Vite build
+- `npm run typecheck` -> TypeScript project references check without emitting output
+- `npm run audit` -> npm dependency audit (including dev tooling)
+- `npm run audit:prod` -> npm audit scoped to production dependencies only
 - `npm run convex:deploy` -> Deploy Convex functions with `.env.local` loaded into process env
 
 ## Notes
 - Auth uses `username + password` and server-side session tokens in Convex.
 - OpenRouter key is used only on the Convex server action, not in the browser.
+- `.env*` files are gitignored by default except `.env.example`.

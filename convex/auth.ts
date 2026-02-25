@@ -54,7 +54,11 @@ function hexToBytes(hex: string): Uint8Array {
   const bytes: number[] = [];
   for (let index = 0; index < hex.length / 2; index += 1) {
     const offset = index * 2;
-    bytes.push(Number.parseInt(hex.slice(offset, offset + 2), 16));
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16);
+    if (Number.isNaN(value)) {
+      throw new Error("Invalid hex value.");
+    }
+    bytes.push(value);
   }
   return new Uint8Array(bytes);
 }

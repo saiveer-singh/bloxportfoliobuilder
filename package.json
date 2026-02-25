@@ -3,12 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "packageManager": "npm@10",
   "scripts": {
     "dev": "vite",
     "convex:dev": "node --env-file=.env.local ./node_modules/convex/bin/main.js dev",
     "convex:deploy": "node --env-file=.env.local ./node_modules/convex/bin/main.js deploy",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
+    "audit": "npm audit --audit-level=high",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -30,5 +37,8 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1"
   }
 }

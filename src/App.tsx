@@ -15,19 +15,10 @@ type BuilderInput = {
   robloxUsername: string;
   primaryRole: string;
   signatureStyle: string;
+  notableProjects: string;
   skillFocus: string;
   targetAudience: string;
   customPrompt: string;
-};
-
-type ProjectInput = {
-  id: string;
-  name: string;
-  summary: string;
-  gameUrl: string;
-  imageUrl: string;
-  imageFile: File | null;
-  storageId?: string;
 };
 
 type GeneratedPortfolio = {
@@ -66,6 +57,10 @@ type ChatMessage = {
   text: string;
 };
 
+type StreamSnapshot = {
+  text?: string;
+};
+
 /* ═══════════════════════════════════════
    CONSTANTS
    ═══════════════════════════════════════ */
@@ -87,24 +82,13 @@ const portfolioRefs = {
   list: makeFunctionReference<"query">("portfolio:listPortfolios"),
   createStream: makeFunctionReference<"mutation">("portfolio:createStream"),
   getStream: makeFunctionReference<"query">("portfolio:getStream"),
-  generateUploadUrl: makeFunctionReference<"mutation">("portfolio:generateUploadUrl"),
-} as const;
-
-const paymentRefs = {
-  checkStatus: makeFunctionReference<"query">("payments:checkPaymentStatus"),
-  createCheckout: makeFunctionReference<"action">("payments:createCheckoutSession"),
-} as const;
-
-const bargainRefs = {
-  getSession: makeFunctionReference<"query">("bargain:getSession"),
-  startSession: makeFunctionReference<"mutation">("bargain:startSession"),
-  sendMessage: makeFunctionReference<"action">("bargain:sendMessage"),
 } as const;
 
 const defaultInput: BuilderInput = {
   robloxUsername: "",
   primaryRole: "",
   signatureStyle: "",
+  notableProjects: "",
   skillFocus: "",
   targetAudience: "",
   customPrompt: "",
@@ -210,9 +194,6 @@ function App() {
 
   // Builder
   const [input, setInput] = useState<BuilderInput>(defaultInput);
-  const [projects, setProjects] = useState<ProjectInput[]>([
-    { id: Date.now().toString(), name: "", summary: "", gameUrl: "", imageUrl: "", imageFile: null }
-  ]);
   const [generated, setGenerated] = useState<GeneratedPortfolio | null>(null);
   const [stored, setStored] = useState<StoredPortfolio[]>([]);
 
@@ -239,30 +220,15 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Payment & Bargain
-  const [showBargain, setShowBargain] = useState(false);
-  const [bargainInput, setBargainInput] = useState("");
-  const [isBargainSending, setIsBargainSending] = useState(false);
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const bargainChatEndRef = useRef<HTMLDivElement>(null);
-
-  const paymentStatus = (useQuery as any)(
-    paymentRefs.checkStatus,
-    session ? { token: session.token } : "skip",
-  );
-  const hasPaid: boolean = paymentStatus === true;
-
-  const bargainData = (useQuery as any)(
-    bargainRefs.getSession,
-    session && paymentStatus === false ? { token: session.token } : "skip",
-  );
-
   // Streaming Reasoning
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
-  const streamData = (useQuery as any)(
-    portfolioRefs.getStream,
-    activeStreamId ? { streamId: activeStreamId } : "skip"
-  );
+  const streamArgs: "skip" | { streamId: string } = activeStreamId
+    ? { streamId: activeStreamId }
+    : "skip";
+  const streamData = useQuery(portfolioRefs.getStream, streamArgs) as
+    | StreamSnapshot
+    | null
+    | undefined;
 
   useEffect(() => {
     if (activeStreamId && streamData) {
@@ -336,7 +302,10 @@ function App() {
   const startProgress = useCallback(
     async (mode: "generate" | "revise", token: string) => {
       try {
-        const streamId = await (convex.mutation as any)(portfolioRefs.createStream, { token, purpose: mode });
+        const streamId = await runMutation<string>(portfolioRefs.createStream, {
+          token,
+          purpose: mode,
+        } as ConvexArgs);
         setActiveStreamId(streamId);
         return streamId;
       } catch (err) {
@@ -344,7 +313,7 @@ function App() {
         return null; // Fallback to non-streaming if table missing etc
       }
     },
-    [convex],
+    [runMutation],
   );
 
   const stopProgress = useCallback(() => {
@@ -416,79 +385,6 @@ function App() {
     void loadStored(session.token);
   }, [hasDeployment, loadStored, session?.token]);
 
-  // Auto-scroll bargain chat
-  useEffect(() => {
-    bargainChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [bargainData?.messages]);
-
-  // Handle Stripe redirect URL params
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("payment") === "success") {
-      setSuccess("Payment processing... you'll be redirected momentarily.");
-      window.history.replaceState({}, "", window.location.pathname);
-    } else if (params.get("payment") === "cancel") {
-      setError("Payment cancelled.");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-
-  /* ─────── PAYMENT & BARGAIN ─────── */
-
-  const onCheckout = async (amount: 899 | 499) => {
-    if (!session?.token) return;
-    setIsCheckingOut(true);
-    setError(null);
-    try {
-      const result = await runAction<{ url: string }>(
-        paymentRefs.createCheckout,
-        {
-          token: session.token,
-          amount,
-          returnUrl: window.location.origin + window.location.pathname,
-        } as ConvexArgs,
-      );
-      if (result.url) {
-        window.location.href = result.url;
-      }
-    } catch (err) {
-      setError(errMsg(err, "Checkout failed."));
-      setIsCheckingOut(false);
-    }
-  };
-
-  const onStartBargain = async () => {
-    if (!session?.token) return;
-    setError(null);
-    try {
-      await runMutation(bargainRefs.startSession, { token: session.token } as ConvexArgs);
-      setShowBargain(true);
-    } catch (err) {
-      setError(errMsg(err, "Failed to start bargain session."));
-    }
-  };
-
-  const onBargainSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const msg = bargainInput.trim();
-    if (!msg || !session?.token || !bargainData?._id || isBargainSending) return;
-    setBargainInput("");
-    setIsBargainSending(true);
-    setError(null);
-    try {
-      await runAction(bargainRefs.sendMessage, {
-        token: session.token,
-        message: msg,
-        sessionId: bargainData._id,
-      } as ConvexArgs);
-    } catch (err) {
-      setError(errMsg(err, "Failed to send message."));
-    } finally {
-      setIsBargainSending(false);
-    }
-  };
-
   /* ─────── AUTH ─────── */
 
   const onAuthSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -531,40 +427,6 @@ function App() {
 
   /* ─────── GENERATE ─────── */
 
-  const uploadImages = async (token: string): Promise<ProjectInput[]> => {
-    const updatedProjects = [...projects];
-    for (let i = 0; i < updatedProjects.length; i++) {
-      const p = updatedProjects[i];
-      if (p.imageFile && !p.storageId) {
-        setChatMessages((prev) => [
-          ...prev.filter(m => m.tone !== "thinking"),
-          { id: `${Date.now()}-upload-${i}`, role: "system", tone: "info", text: `Uploading image for ${p.name || "project"}...` }
-        ]);
-
-        const postUrl = await runMutation<string>(portfolioRefs.generateUploadUrl, { token } as ConvexArgs);
-        const result = await fetch(postUrl, {
-          method: "POST",
-          headers: { "Content-Type": p.imageFile.type },
-          body: p.imageFile,
-        });
-        const { storageId } = await result.json();
-        updatedProjects[i].storageId = storageId;
-        updatedProjects[i].imageUrl = storageId; // Use storageId as imageUrl for the backend
-      }
-    }
-    setProjects(updatedProjects);
-    return updatedProjects;
-  };
-
-  const serializeProjects = (projs: ProjectInput[]) => {
-    return JSON.stringify(projs.map(p => ({
-      name: p.name,
-      summary: p.summary,
-      gameUrl: p.gameUrl,
-      imageUrl: p.storageId || p.imageUrl
-    })));
-  };
-
   const onGenerate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
@@ -586,19 +448,17 @@ function App() {
     const streamId = await startProgress("generate", session.token);
 
     try {
-      const finalProjects = await uploadImages(session.token);
       const actionArgs = {
         robloxUsername: input.robloxUsername,
         primaryRole: input.primaryRole,
         signatureStyle: input.signatureStyle,
-        notableProjects: serializeProjects(finalProjects),
+        notableProjects: input.notableProjects,
         skillFocus: input.skillFocus,
         targetAudience: input.targetAudience,
         customPrompt: input.customPrompt || "",
         streamId,
         token: session.token,
       } as ConvexArgs;
-
 
       let result: GeneratedPortfolio;
       try {
@@ -668,19 +528,29 @@ function App() {
     const streamId = await startProgress("revise", session.token);
 
     try {
-      const finalProjects = await uploadImages(session.token);
-      const revised = await runAction<GeneratedPortfolio>(
-        portfolioRefs.revise,
-        {
-          ...input,
-          notableProjects: serializeProjects(finalProjects),
-          ...generated,
-          streamId,
-          token: session.token,
-          userRequest: prompt,
-          customPrompt: input.customPrompt || "",
-        } as ConvexArgs,
-      );
+      const reviseArgs = {
+        ...input,
+        ...generated,
+        streamId,
+        token: session.token,
+        userRequest: prompt,
+        customPrompt: input.customPrompt || "",
+      } as ConvexArgs;
+      let revised: GeneratedPortfolio;
+      try {
+        revised = await runAction<GeneratedPortfolio>(
+          portfolioRefs.revise,
+          reviseArgs,
+        );
+      } catch (firstErr) {
+        if (!shouldRetryWithoutToken(firstErr)) throw firstErr;
+        const { token: _t, ...rest } = reviseArgs;
+        void _t;
+        revised = await runAction<GeneratedPortfolio>(
+          portfolioRefs.revise,
+          rest as ConvexArgs,
+        );
+      }
       setGenerated(revised);
       setChatMessages((prev) => [
         ...prev.filter((m) => m.tone !== "thinking"),
@@ -719,12 +589,11 @@ function App() {
     setSuccess(null);
     setIsSaving(true);
     try {
-      const finalProjects = await uploadImages(session.token);
       const saveArgs = {
         robloxUsername: input.robloxUsername,
         primaryRole: input.primaryRole,
         signatureStyle: input.signatureStyle,
-        notableProjects: serializeProjects(finalProjects),
+        notableProjects: input.notableProjects,
         skillFocus: input.skillFocus,
         targetAudience: input.targetAudience,
         customPrompt: input.customPrompt || "",
@@ -768,14 +637,26 @@ function App() {
     setSuccess(null);
     setIsPublishing(true);
     try {
-      const result = await runMutation<{ slug: string }>(
-        portfolioRefs.publish,
-        {
-          token: session.token,
-          portfolioId: selectedPortfolioId,
-          slug,
-        } as ConvexArgs,
-      );
+      const publishArgs = {
+        token: session.token,
+        portfolioId: selectedPortfolioId,
+        slug,
+      } as ConvexArgs;
+      let result: { slug: string };
+      try {
+        result = await runMutation<{ slug: string }>(
+          portfolioRefs.publish,
+          publishArgs,
+        );
+      } catch (firstErr) {
+        if (!shouldRetryWithoutToken(firstErr)) throw firstErr;
+        const { token: _t, ...rest } = publishArgs;
+        void _t;
+        result = await runMutation<{ slug: string }>(
+          portfolioRefs.publish,
+          rest as ConvexArgs,
+        );
+      }
       setPublishUrl(`${portfolioHost}/p/${result.slug}`);
       setSuccess("Published. URL ready.");
       await loadStored(session.token);
@@ -812,8 +693,8 @@ function App() {
             </h1>
             <p className="hero-desc">
               AI-powered portfolio builder designed for Roblox developers.
-              Generate, chat-revise, and publish — starting at $4.99 if
-              you can bargain for it.
+              Generate, chat-revise, and publish — tuned for studios,
+              publishers, and game teams.
             </p>
             <a href="#auth" className="hero-cta">
               Start Building →
@@ -829,22 +710,22 @@ function App() {
 
         <section className="steps">
           <div className="steps-inner">
-            <h2 className="steps-title">How it works</h2>
+            <h2 className="steps-title">Three steps to a killer portfolio</h2>
             <div className="steps-grid">
               <div className="step-card">
                 <span className="step-num">01</span>
-                <h3>Unlock</h3>
+                <h3>Brief</h3>
                 <p>
-                  Pay $8.99 — or bargain with ROBUCKS, our stubborn AI
-                  merchant, to unlock the $4.99 deal. If you can impress him.
+                  Fill in your Roblox username, role, projects, and style. Add
+                  custom instructions to steer the AI.
                 </p>
               </div>
               <div className="step-card">
                 <span className="step-num">02</span>
                 <h3>Forge</h3>
                 <p>
-                  Fill in your brief and watch the AI reason through your
-                  positioning. Chat to revise tone, structure, and outcomes.
+                  Watch the AI reason through your positioning. Chat to revise
+                  tone, structure, and outcomes in real time.
                 </p>
               </div>
               <div className="step-card">
@@ -936,219 +817,6 @@ function App() {
         <footer className="footer">
           <p>Bloxfolio — Built for Roblox developers</p>
         </footer>
-      </div>
-    );
-  }
-
-  /* ═══════════════════════════════════════
-     RENDER: LOADING / PAYMENT GATE
-     ═══════════════════════════════════════ */
-
-  if (paymentStatus === undefined) {
-    return (
-      <div className="loading-gate">
-        <div className="loading-spinner" />
-        <p>Loading...</p>
-      </div>
-    );
-  }
-
-  if (!hasPaid) {
-    const moodPercent = bargainData?.mood ?? 0;
-    const moodColor =
-      moodPercent >= 80
-        ? "var(--success)"
-        : moodPercent >= 50
-          ? "var(--accent)"
-          : moodPercent >= 30
-            ? "#ff8800"
-            : "var(--error)";
-    const discountUnlocked = bargainData?.discountUnlocked === true;
-
-    return (
-      <div className="pricing-gate">
-        <header className="ws-nav">
-          <div className="ws-brand">
-            <div className="logo-block" />
-            <span>BLOXFOLIO</span>
-          </div>
-          <div className="ws-meta">
-            <span className="ws-chip user-chip">@{session.username}</span>
-            <button
-              className="ws-logout"
-              type="button"
-              onClick={() => void clearSession()}
-            >
-              Log out
-            </button>
-          </div>
-        </header>
-
-        <div className="pricing-content">
-          <div className="pricing-hero">
-            <h1 className="pricing-title">
-              Unlock The <span className="accent">Forge</span>
-            </h1>
-            <p className="pricing-subtitle">
-              Build your AI-powered Roblox portfolio. Choose your path.
-            </p>
-          </div>
-
-          <div className="pricing-cards">
-            <div className="pricing-card">
-              <div className="pricing-card-badge">Standard</div>
-              <div className="pricing-amount">
-                <span className="pricing-dollar">$</span>
-                <span className="pricing-number">8</span>
-                <span className="pricing-cents">.99</span>
-              </div>
-              <p className="pricing-desc">
-                Full price. No games. Instant access to the AI portfolio forge.
-              </p>
-              <ul className="pricing-features">
-                <li>AI-powered portfolio generation</li>
-                <li>Chat-based revisions</li>
-                <li>Custom themes & fonts</li>
-                <li>Publish with custom URL</li>
-              </ul>
-              <button
-                className="btn-primary pricing-btn"
-                onClick={() => void onCheckout(899)}
-                disabled={isCheckingOut}
-              >
-                {isCheckingOut ? "Redirecting..." : "Pay & Build"}
-              </button>
-            </div>
-
-            <div className={`pricing-card pricing-card-deal ${discountUnlocked ? "deal-unlocked" : ""}`}>
-              <div className="pricing-card-badge deal-badge">
-                {discountUnlocked ? "UNLOCKED" : "THE DEAL"}
-              </div>
-              <div className="pricing-amount">
-                <span className="pricing-dollar">$</span>
-                <span className="pricing-number">4</span>
-                <span className="pricing-cents">.99</span>
-              </div>
-              {!discountUnlocked && (
-                <div className="deal-lock-icon">LOCKED</div>
-              )}
-              <p className="pricing-desc">
-                {discountUnlocked
-                  ? "ROBUCKS is impressed. The deal is yours."
-                  : "Convince ROBUCKS the merchant to unlock this price."}
-              </p>
-              {discountUnlocked ? (
-                <button
-                  className="btn-primary pricing-btn deal-btn-unlocked"
-                  onClick={() => void onCheckout(499)}
-                  disabled={isCheckingOut}
-                >
-                  {isCheckingOut ? "Redirecting..." : "Claim The Deal"}
-                </button>
-              ) : (
-                <button
-                  className="btn-secondary pricing-btn"
-                  onClick={() => {
-                    if (!bargainData) {
-                      void onStartBargain();
-                    } else {
-                      setShowBargain(true);
-                    }
-                  }}
-                >
-                  {bargainData ? "Continue Bargaining" : "Bargain with ROBUCKS"}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Bargain Bot Interface */}
-          {(showBargain || bargainData) && bargainData && (
-            <div className="bargain-section">
-              <div className="bargain-header">
-                <h2>Bargain with ROBUCKS</h2>
-                <div className="mood-display">
-                  <span className="mood-label">MOOD</span>
-                  <div className="mood-bar-track">
-                    <div
-                      className={`mood-bar-fill ${discountUnlocked ? "mood-success" : ""}`}
-                      style={{
-                        width: `${moodPercent}%`,
-                        background: moodColor,
-                      }}
-                    />
-                    <div className="mood-threshold-marker" />
-                  </div>
-                  <span className="mood-value" style={{ color: moodColor }}>
-                    {moodPercent}/100
-                  </span>
-                </div>
-                {!discountUnlocked && (
-                  <p className="mood-hint">
-                    Reach 80 to unlock the deal. Good luck.
-                  </p>
-                )}
-              </div>
-
-              <div className="bargain-chat">
-                <div className="bargain-messages">
-                  {(bargainData.messages || []).map(
-                    (msg: { role: string; text: string }, i: number) => (
-                      <div
-                        key={i}
-                        className={`bargain-msg ${msg.role === "user" ? "bargain-msg-user" : "bargain-msg-bot"}`}
-                      >
-                        {msg.role === "assistant" && (
-                          <span className="bargain-avatar">R</span>
-                        )}
-                        <div className="bargain-msg-content">{msg.text}</div>
-                      </div>
-                    ),
-                  )}
-                  {isBargainSending && (
-                    <div className="bargain-msg bargain-msg-bot">
-                      <span className="bargain-avatar">R</span>
-                      <div className="bargain-msg-content bargain-thinking">
-                        ROBUCKS is thinking...
-                      </div>
-                    </div>
-                  )}
-                  <div ref={bargainChatEndRef} />
-                </div>
-
-                {!discountUnlocked && bargainData.messageCount < 50 && (
-                  <form className="bargain-input" onSubmit={onBargainSubmit}>
-                    <input
-                      type="text"
-                      placeholder="Say something to ROBUCKS..."
-                      value={bargainInput}
-                      onChange={(e) => setBargainInput(e.target.value)}
-                      disabled={isBargainSending}
-                    />
-                    <button type="submit" disabled={isBargainSending || !bargainInput.trim()}>
-                      {isBargainSending ? "..." : "Send"}
-                    </button>
-                  </form>
-                )}
-
-                {bargainData.messageCount >= 50 && !discountUnlocked && (
-                  <div className="bargain-limit">
-                    <p>Message limit reached. ROBUCKS has had enough.</p>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => void onStartBargain()}
-                    >
-                      Reset & Try Again
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {error && <div className="toast toast-error">{error}</div>}
-        {success && <div className="toast toast-success">{success}</div>}
       </div>
     );
   }
@@ -1259,78 +927,21 @@ function App() {
                   />
                   <p className="field-help">Summarize your design aesthetic or technical approach in one sentence.</p>
                 </div>
-                <div className="field-group project-list-group">
-                  <div className="project-list-header">
-                    <label>Notable Projects</label>
-                    <button
-                      type="button"
-                      onClick={() => setProjects(p => [...p, { id: Date.now().toString(), name: "", summary: "", gameUrl: "", imageUrl: "", imageFile: null }])}
-                      className="add-project-btn"
-                    >
-                      + ADD PROJECT
-                    </button>
-                  </div>
-
-                  {projects.map((proj, i) => (
-                    <div key={proj.id} className="project-input-card">
-                      <div className="project-input-header">
-                        <h5>Project {i + 1}</h5>
-                        {projects.length > 1 && (
-                          <button type="button" onClick={() => setProjects(p => p.filter(x => x.id !== proj.id))} className="remove-project-btn">✕</button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Project Name (e.g. Neon Siege Arena)"
-                        value={proj.name}
-                        onChange={e => {
-                          const newProjects = [...projects];
-                          newProjects[i].name = e.target.value;
-                          setProjects(newProjects);
-                        }}
-                        required
-                      />
-                      <textarea
-                        placeholder="Summary & Impact (e.g. Shipped V1, 5K+ CCU, Custom LuaU Combat)"
-                        value={proj.summary}
-                        rows={2}
-                        onChange={e => {
-                          const newProjects = [...projects];
-                          newProjects[i].summary = e.target.value;
-                          setProjects(newProjects);
-                        }}
-                        required
-                      />
-                      <div className="project-media-inputs">
-                        <input
-                          type="text"
-                          placeholder="Play Experience URL (https://roblox.com/...)"
-                          value={proj.gameUrl}
-                          onChange={e => {
-                            const newProjects = [...projects];
-                            newProjects[i].gameUrl = e.target.value;
-                            setProjects(newProjects);
-                          }}
-                        />
-                        <div className="file-upload-wrapper">
-                          <span>{proj.imageFile ? proj.imageFile.name : "+ UPLOAD COVER IMAGE"}</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => {
-                              const file = e.target.files?.[0] || null;
-                              const newProjects = [...projects];
-                              newProjects[i].imageFile = file;
-                              newProjects[i].storageId = undefined; // clear old storage ID if they pick a new file
-                              newProjects[i].imageUrl = "";
-                              setProjects(newProjects);
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="field-help">Upload a striking 16:9 image and provide direct game links!</p>
+                <div className="field-group">
+                  <label>Notable Projects</label>
+                  <textarea
+                    value={input.notableProjects}
+                    onChange={(e) =>
+                      setInput((p) => ({
+                        ...p,
+                        notableProjects: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Neon Siege Arena (Shipped V1, 5K+ CCU), Mythic Tycoon Reforged"
+                    rows={2}
+                    required
+                  />
+                  <p className="field-help">List 1-3 projects. Include metrics (CCU, visits, revenue impact) if possible.</p>
                 </div>
                 <div className="field-row">
                   <div className="field-group">
@@ -1424,6 +1035,9 @@ function App() {
                       setPublishUrl(
                         `${portfolioHost}/p/${item.publicSlug}`,
                       );
+                    } else {
+                      setPublishSlug("");
+                      setPublishUrl(null);
                     }
                   }}
                 >

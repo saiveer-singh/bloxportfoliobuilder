@@ -2,15 +2,16 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { action, mutation, query, internalMutation, internalQuery } from "./_generated/server.js";
 import { internal } from "./_generated/api.js";
+import type { Id } from "./_generated/dataModel";
 import { requireUserByToken } from "./auth";
 
 const currentUserByToken = makeFunctionReference<
   "query",
   { token: string },
-  { _id: string; username: string; createdAt: number } | null
+  { _id: Id<"users">; username: string; createdAt: number } | null
 >("auth:currentUser");
 
-const INTRO_MESSAGE = {
+const INTRO_MESSAGE: { role: "assistant"; text: string } = {
   role: "assistant",
   text: `Well well WELL... another developer comes crawling to ROBUCKS looking for a deal. *adjusts monocle made of pure Robux*
 
@@ -28,6 +29,7 @@ const MAX_MESSAGES = 50;
 const MAX_MOOD = 100;
 const MIN_MOOD = 0;
 const START_MOOD = 20;
+const MAX_MESSAGE_LENGTH = 400;
 
 function buildBargainSystemPrompt(mood: number, messageCount: number) {
   return `You are ROBUCKS, a legendary and INCREDIBLY stubborn Roblox merchant NPC. You guard the pricing for Bloxfolio portfolio builder. The full price is $8.99 but there's a secret discount of $4.99 that you ONLY give to people who genuinely impress you.
@@ -179,6 +181,14 @@ export const sendMessage = action({
     const user = await ctx.runQuery(currentUserByToken, { token: args.token });
     if (!user) throw new Error("Unauthorized");
 
+    const message = args.message.trim();
+    if (!message) {
+      throw new Error("Message cannot be empty.");
+    }
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      throw new Error(`Message too long. Keep it under ${MAX_MESSAGE_LENGTH} characters.`);
+    }
+
     const session = await ctx.runQuery(internal.bargain.internalGetSession, {
       sessionId: args.sessionId,
     });
@@ -194,7 +204,7 @@ export const sendMessage = action({
     // Add user message immediately (triggers reactive UI update)
     await ctx.runMutation(internal.bargain.addUserMessage, {
       sessionId: args.sessionId,
-      text: args.message,
+      text: message,
     });
 
     // Build conversation history for AI (last 10 messages for context)
@@ -203,7 +213,7 @@ export const sendMessage = action({
       role: m.role === "assistant" ? "assistant" : "user",
       content: m.text,
     }));
-    conversationHistory.push({ role: "user", content: args.message });
+    conversationHistory.push({ role: "user", content: message });
 
     // Call OpenRouter for AI response
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
@@ -255,8 +265,11 @@ export const sendMessage = action({
       return;
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+    const contentRaw = data.choices?.[0]?.message?.content;
+    const content = typeof contentRaw === "string" ? contentRaw : "";
 
     // Parse the AI response JSON
     let aiResponse = "...";
